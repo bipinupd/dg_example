@@ -1,0 +1,74 @@
+version: 2
+
+unit_tests:
+  - name: test_dim_customers_aggregates_only_completed_orders
+    description: >-
+      Verify dim_customers counts and sums only completed orders and defaults
+      customers with no completed orders to 0.
+    model: dim_customers
+    given:
+      - input: ref('stg_customers')
+        rows:
+          - customer_id: 1
+            full_name: "Alice Mercer"
+            email: "alice@example.com"
+            work_email: "alice.w@corp.example.com"
+            ssn: "000-00-0001"
+            country_code: "US"
+            loyalty_tier: "Gold"
+            annual_income_usd: 145000
+            updated_at: "2026-01-10 09:15:00+00:00"
+          - customer_id: 2
+            full_name: "Bob Chen"
+            email: "bob@example.com"
+            work_email: "bob.w@corp.example.com"
+            ssn: "000-00-0002"
+            country_code: "US"
+            loyalty_tier: "Silver"
+            annual_income_usd: 98500.5
+            updated_at: "2026-01-12 14:30:00+00:00"
+      - input: ref('stg_orders')
+        rows:
+          - order_id: 1001
+            customer_id: 1
+            order_date: "2026-01-11"
+            amount_usd: 250
+            status: "completed"
+            actor_email: "actor.a@example.com"
+            event_type: "checkout"
+          - order_id: 1002
+            customer_id: 1
+            order_date: "2026-01-14"
+            amount_usd: 125.5
+            status: "completed"
+            actor_email: "actor.a@example.com"
+            event_type: "renewal"
+          - order_id: 1004
+            customer_id: 2
+            order_date: "2026-01-16"
+            amount_usd: 45
+            status: "cancelled"
+            actor_email: "actor.b@example.com"
+            event_type: "refund"
+    expect:
+      rows:
+        - customer_id: 1
+          full_name: "Alice Mercer"
+          email: "alice@example.com"
+          ssn: "000-00-0001"
+          country_code: "US"
+          loyalty_tier: "Gold"
+          annual_income_usd: 145000
+          completed_order_count: 2
+          lifetime_spend_usd: 375.5
+          updated_at: "2026-01-10 09:15:00+00:00"
+        - customer_id: 2
+          full_name: "Bob Chen"
+          email: "bob@example.com"
+          ssn: "000-00-0002"
+          country_code: "US"
+          loyalty_tier: "Silver"
+          annual_income_usd: 98500.5
+          completed_order_count: 0
+          lifetime_spend_usd: 0
+          updated_at: "2026-01-12 14:30:00+00:00"

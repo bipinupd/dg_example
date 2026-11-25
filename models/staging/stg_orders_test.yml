@@ -1,0 +1,41 @@
+version: 2
+
+unit_tests:
+  - name: test_stg_orders_parses_mixed_date_formats
+    description: >-
+      Verify stg_orders parses both YYYY-MM-DD and MM/DD/YYYY date strings and
+      casts amount_usd cleanly.
+    model: stg_orders
+    given:
+      - input: ref('raw_orders')
+        rows:
+          - order_id: 1001
+            customer_id: 1
+            order_date: "2026-01-11"
+            amount_usd: "250.00"
+            status: "completed"
+            actor_email: "actor.a@example.com"
+            event_type: "checkout"
+          - order_id: 1002
+            customer_id: 1
+            order_date: "01/14/2026"
+            amount_usd: "125.50"
+            status: "cancelled"
+            actor_email: "actor.a@example.com"
+            event_type: "refund"
+    expect:
+      rows:
+        - order_id: 1001
+          customer_id: 1
+          order_date: "2026-01-11"
+          amount_usd: 250
+          status: "completed"
+          actor_email: "actor.a@example.com"
+          event_type: "checkout"
+        - order_id: 1002
+          customer_id: 1
+          order_date: "2026-01-14"
+          amount_usd: 125.5
+          status: "cancelled"
+          actor_email: "actor.a@example.com"
+          event_type: "refund"

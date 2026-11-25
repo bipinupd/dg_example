@@ -1,0 +1,40 @@
+version: 2
+
+unit_tests:
+  - name: test_stg_customers_trims_whitespace_and_casts_types
+    description: >-
+      Verify stg_customers trims whitespace while preserving case, casts
+      numeric/timestamp strings safely, and filters null customer_ids.
+    model: stg_customers
+    given:
+      - input: ref('raw_customers')
+        rows:
+          - customer_id: 1
+            full_name: "  Alice Mercer  "
+            email: "  alice@example.com "
+            work_email: "alice.w@corp.example.com"
+            ssn: "000-00-0001"
+            country_code: " US "
+            loyalty_tier: " Gold "
+            annual_income_usd: "145000.00"
+            updated_at: "2026-01-10T09:15:00Z"
+          - customer_id: null
+            full_name: "Invalid Row"
+            email: "invalid@example.com"
+            work_email: "invalid@example.com"
+            ssn: "000-00-0000"
+            country_code: "US"
+            loyalty_tier: "Bronze"
+            annual_income_usd: "0"
+            updated_at: "2026-01-10T09:15:00Z"
+    expect:
+      rows:
+        - customer_id: 1
+          full_name: "Alice Mercer"
+          email: "alice@example.com"
+          work_email: "alice.w@corp.example.com"
+          ssn: "000-00-0001"
+          country_code: "US"
+          loyalty_tier: "Gold"
+          annual_income_usd: 145000
+          updated_at: "2026-01-10 09:15:00+00:00"

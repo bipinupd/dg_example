@@ -1,0 +1,7 @@
+order_id,customer_id,order_date,amount_usd,status,actor_email,event_type
+1001,1,2026-01-11,250.00,completed,actor.alice@example.com,checkout
+1002,1,01/14/2026,125.50,completed,actor.alice@example.com,renewal
+1003,2,2026-01-13,89.99,completed,actor.bob@example.com,checkout
+1004,2,2026-01-16,45.00,cancelled,actor.bob@example.com,refund
+1005,3,01/18/2026,640.00,completed,actor.carol@example.com,upgrade
+1006,4,2026-01-21,110.25,completed,actor.david@example.com,checkout

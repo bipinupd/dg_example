@@ -1,0 +1,5 @@
+customer_id,full_name,email,work_email,ssn,country_code,loyalty_tier,annual_income_usd,updated_at
+1,  Alice Mercer  ,alice.mercer@example.com,alice.m@corp.example.com,000-00-0001,US, Gold ,145000.00,2026-01-10T09:15:00Z
+2,Bob Chen,  bob.chen@example.com  ,bob.c@corp.example.com,000-00-0002,US,Silver,98500.50,2026-01-12T14:30:00Z
+3,Carol Patel,carol.patel@example.com,carol.p@corp.example.com,000-00-0003,CA,Platinum,215000.00,2026-01-15T18:45:00Z
+4,  David Kim,david.kim@example.com,david.k@corp.example.com,000-00-0004,GB, Bronze ,72000.00,2026-01-20T08:00:00Z

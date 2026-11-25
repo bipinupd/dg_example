@@ -1,0 +1,171 @@
+version: 2
+
+# ---------------------------------------------------------------------------
+# Data Governance Tags YAML Syntax Notes
+# ---------------------------------------------------------------------------
+# 1. Configurable dynamic key + value mapping (recommended when project/org ID
+#    is parameterized via profiles.yml target.database, env_var, or --vars):
+#      data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): 'email' } }}"
+#    (In dbt Core 1.x, Jinja renders YAML dict *values* or the entire mapping
+#     expression, not unquoted YAML dict *keys*.)
+#
+# 2. Static literal mapping (when your Org ID / project ID is fixed):
+#      data_governance_tags:
+#        123456789012/data_classification: email
+#
+# 3. Always specify the LEAF tag value shortName (e.g. `email`), NEVER a
+#    hierarchical path like `pii/email`.
+#
+# 4. BigQuery enforces at most ONE data governance tag per column (different
+#    columns in the same table may use different Tag Keys) and forbids mixing
+#    `policy_tags` and `data_governance_tags` on the same column.
+# ---------------------------------------------------------------------------
+
+models:
+  - name: dim_customers
+    description: >-
+      Core customer dimension table demonstrating top-level scalar column
+      `data_governance_tags` across both classification (`dbt_dgt_e2e_class`)
+      and domain (`dbt_dgt_e2e_domain`) Tag Keys.
+    columns:
+      - name: customer_id
+        description: "Primary customer identifier (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: full_name
+        description: "Cleaned customer full name."
+      - name: email
+        description: >-
+          Customer primary email address tagged with leaf value `email` (child
+          under `pii`). Triggers `EMAIL_MASK` when bound to a Data Policy v2 rule.
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_email_tag_value') } }}"
+        data_tests:
+          - not_null
+      - name: ssn
+        description: >-
+          Synthetic US SSN tagged with leaf value `ssn` (child under `pii`).
+          Triggers `SHA256` masking when bound to a Data Policy v2 rule.
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_ssn_tag_value') } }}"
+      - name: country_code
+        description: "ISO-2 country code (untagged)."
+      - name: loyalty_tier
+        description: "Customer loyalty tier tagged with root classification `public`."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_public_tag_value') } }}"
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Bronze', 'Silver', 'Gold', 'Platinum']
+      - name: annual_income_usd
+        description: >-
+          Customer annual income in USD tagged under a second Tag Key
+          (`dbt_dgt_e2e_domain: finance`) on a sibling column in the same table.
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_domain_key_name') or env_var('DGT_DOMAIN_KEY_NAME', '') or 'dbt_dgt_e2e_domain')): var('dgt_finance_tag_value') } }}"
+      - name: completed_order_count
+        description: "Total count of completed orders for this customer."
+        data_tests:
+          - not_null
+      - name: lifetime_spend_usd
+        description: "Total USD spend across completed orders."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_domain_key_name') or env_var('DGT_DOMAIN_KEY_NAME', '') or 'dbt_dgt_e2e_domain')): var('dgt_finance_tag_value') } }}"
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "UTC timestamp of the latest customer record update."
+        data_tests:
+          - not_null
+
+  - name: fct_customer_profiles
+    description: >-
+      Incremental customer profile table demonstrating production best
+      practices: in-place incremental merges (no drop-and-recreate exposure
+      window), 1-level & 2-level nested STRUCT leaf tags, repeated
+      ARRAY<STRUCT> leaf tags, and explicit tag clearing (`{}`).
+    columns:
+      - name: customer_id
+        description: "Primary customer identifier (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: primary_email
+        description: "Top-level customer email column with PII governance tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_email_tag_value') } }}"
+        data_tests:
+          - not_null
+      - name: public_display_note
+        description: >-
+          Non-sensitive display label demonstrating explicit tag clearing with
+          an empty mapping (`{}`). Works on both dbt Core 1.x and dbt v2 / Fusion.
+        data_governance_tags: {}
+      - name: profile
+        description: >-
+          Parent STRUCT column. BigQuery forbids attaching `data_governance_tags`
+          to RECORD/STRUCT parents; descriptions are supported here while tags
+          go on leaf subfields below.
+      - name: profile.work_email
+        description: "1-level nested STRUCT leaf tagged as PII email."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_email_tag_value') } }}"
+      - name: profile.identity.ssn
+        description: "2-level nested STRUCT leaf tagged as PII SSN."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_ssn_tag_value') } }}"
+      - name: profile.identity.country_code
+        description: "2-level nested STRUCT leaf left intentionally untagged."
+      - name: order_events.actor_email
+        description: >-
+          Repeated ARRAY<STRUCT> leaf column tagged as PII email (supported via
+          dbt-bigquery REST `tables.patch`).
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_email_tag_value') } }}"
+      - name: updated_at
+        description: "High-watermark UTC timestamp used for incremental merges."
+        data_tests:
+          - not_null
+
+  - name: dim_customers_contracted
+    description: >-
+      Contract-enforced customer table combining `contract: {enforced: true}`
+      type guarantees with top-level and nested STRUCT leaf Data Governance Tags.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: customer_id
+        data_type: int64
+        description: "Contracted INT64 primary key (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: email
+        data_type: string
+        description: "Contracted STRING email column protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_email_tag_value') } }}"
+      - name: loyalty_tier
+        data_type: string
+        description: "Contracted STRING loyalty tier tagged as `public`."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_public_tag_value') } }}"
+      - name: identity.ssn
+        data_type: string
+        description: "Contracted nested STRUCT leaf SSN protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or 'dbt_dgt_e2e_class')): var('dgt_ssn_tag_value') } }}"
+      - name: identity.country_code
+        data_type: string
+        description: "Contracted nested STRUCT leaf ISO-2 country code (untagged)."
+
+  - name: v_customers_public
+    description: >-
+      Public non-PII analytics view over `dim_customers`. Carries column
+      descriptions only (no direct `data_governance_tags`, since BigQuery only
+      permits governance tags on tables).
+    columns:
+      - name: customer_id
+        description: "Customer identifier."
+        data_tests:
+          - unique
+          - not_null
+      - name: country_code
+        description: "ISO-2 country code."
+      - name: loyalty_tier
+        description: "Customer loyalty tier (inherits tag/policy from dim_customers)."
+      - name: completed_order_count
+        description: "Completed order count."
+      - name: updated_at
+        description: "Last update UTC timestamp."
