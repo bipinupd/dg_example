@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Shared GCP helper for the dbt Core 1.x & dbt v2 / Fusion DGT examples.
+"""Zero-dependency GCP helper for the dbt Core 1.x & dbt v2 / Fusion DGT examples.
 
-Uses only Python standard library + `google-auth` + `google-cloud-bigquery`.
+Uses ONLY Python 3 standard library (`urllib`, `json`, `subprocess`).
+Obtains an OAuth access token via `google-auth` if available, or falls back
+automatically to `gcloud auth application-default print-access-token` /
+`gcloud auth print-access-token` — so it works on any Fusion VM with zero venv
+or pip installs.
 
 Subcommands:
   setup     Idempotently provision DATA_GOVERNANCE Tag Keys/Values, dataset,
@@ -19,26 +23,18 @@ import copy
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
-
-try:
-    import google.auth
-    import google.auth.transport.requests
-    from google.cloud import bigquery
-except ImportError as exc:
-    raise SystemExit(
-        f"Missing Python dependency ({exc}). Either install them in a virtualenv "
-        "(`pip install google-auth google-cloud-bigquery`) or pass "
-        "`PYTHON=/path/to/venv/bin/python`."
-    ) from exc
+from typing import Any, Dict, List, Optional, Tuple
 
 CRM_V3 = "https://cloudresourcemanager.googleapis.com/v3"
 DP_V2 = "https://bigquerydatapolicy.googleapis.com/v2"
+BQ_V2 = "https://bigquery.googleapis.com/bigquery/v2"
 
 _PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
 _DATASET_RE = re.compile(r"^[A-Za-z0-9_]{1,1024}$")
@@ -46,6 +42,8 @@ _LOCATION_RE = re.compile(r"^[A-Za-z0-9-]{2,32}$")
 _TAG_SHORT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
 _POLICY_PREFIX_RE = re.compile(r"^[A-Za-z0-9_]{1,40}$")
 _PRINCIPAL_RE = re.compile(r"^(principal|principalSet)://\S+$")
+
+_CACHED_TOKEN: Optional[Tuple[str, Optional[str]]] = None
 
 
 def _labels_for_mode(mode: str) -> Dict[str, str]:
@@ -68,14 +66,62 @@ def _validate_project(project_id: str) -> str:
     return _validate("project ID", project_id, _PROJECT_RE)
 
 
-def _get_access_token() -> tuple[str, Any]:
-    creds, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+def _get_access_token() -> Tuple[str, Optional[str]]:
+    """Return `(access_token, service_account_email_or_none)` using stdlib fallback."""
+    global _CACHED_TOKEN
+    if _CACHED_TOKEN is not None:
+        return _CACHED_TOKEN
+
+    # 1. Prefer google-auth when installed (e.g. inside a dbt Core virtualenv).
+    try:
+        import google.auth  # type: ignore[import-not-found]
+        import google.auth.transport.requests  # type: ignore[import-not-found]
+
+        creds, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        creds.refresh(google.auth.transport.requests.Request())
+        if creds.token:
+            sa_email = getattr(creds, "service_account_email", None)
+            if sa_email == "default":
+                sa_email = None
+            _CACHED_TOKEN = (creds.token, sa_email)
+            return _CACHED_TOKEN
+    except Exception:
+        pass
+
+    # 2. Pure-stdlib fallback via `gcloud` CLI (works on Fusion VMs without pip).
+    gcloud_bin = shutil.which("gcloud")
+    if not gcloud_bin:
+        raise RuntimeError(
+            "Neither `google-auth` nor `gcloud` CLI is available to obtain an "
+            "access token. Install gcloud CLI or pass PYTHON=/path/to/venv/bin/python."
+        )
+
+    env = os.environ.copy()
+    existing_metrics = env.get("CLOUDSDK_METRICS_ENVIRONMENT", "").strip()
+    env["CLOUDSDK_METRICS_ENVIRONMENT"] = (
+        f"{existing_metrics} datacloud.antigravity"
+        if existing_metrics
+        else "datacloud.antigravity"
     )
-    creds.refresh(google.auth.transport.requests.Request())
-    if not creds.token:
-        raise RuntimeError("Failed to obtain Google Cloud ADC access token.")
-    return creds.token, creds
+
+    for cmd in (
+        [gcloud_bin, "auth", "application-default", "print-access-token"],
+        [gcloud_bin, "auth", "print-access-token"],
+    ):
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, env=env, timeout=20, check=False
+        )
+        token = (proc.stdout or "").strip()
+        if proc.returncode == 0 and token:
+            _CACHED_TOKEN = (token, None)
+            return _CACHED_TOKEN
+
+    raise RuntimeError(
+        "Failed to obtain Google Cloud access token. Run "
+        "`gcloud auth application-default login` (or `gcloud auth login`)."
+    )
 
 
 def _gcp_rest(
@@ -84,8 +130,10 @@ def _gcp_rest(
     body: Optional[Dict[str, Any]] = None,
     *,
     allow_not_found: bool = False,
+    allow_conflict: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    if not (url.startswith(CRM_V3 + "/") or url.startswith(DP_V2 + "/")):
+    allowed_prefixes = (CRM_V3 + "/", DP_V2 + "/", BQ_V2 + "/")
+    if not url.startswith(allowed_prefixes):
         raise ValueError("Refusing request to unexpected API endpoint.")
     token, _ = _get_access_token()
     headers = {
@@ -95,12 +143,14 @@ def _gcp_rest(
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
         err = exc.read().decode("utf-8", errors="replace")
         if allow_not_found and exc.code == 404:
+            return None
+        if allow_conflict and exc.code == 409:
             return None
         raise RuntimeError(f"{method} {url} failed ({exc.code}): {err}") from exc
 
@@ -132,9 +182,8 @@ def _resolve_project_number(project_id: str) -> str:
 
 
 def _get_active_iam_v3_principal() -> str:
-    token, creds = _get_access_token()
-    sa_email = getattr(creds, "service_account_email", None)
-    if sa_email and sa_email != "default":
+    token, sa_email = _get_access_token()
+    if sa_email:
         return f"principal://iam.googleapis.com/projects/-/serviceAccounts/{sa_email}"
     req = urllib.request.Request(
         "https://oauth2.googleapis.com/tokeninfo",
@@ -146,9 +195,136 @@ def _get_active_iam_v3_principal() -> str:
     email = info.get("email")
     if not email:
         raise RuntimeError(
-            "Unable to infer caller email from ADC token; specify --grantee explicitly."
+            "Unable to infer caller email from token; specify --grantee explicitly."
         )
+    if email.endswith(".gserviceaccount.com"):
+        return f"principal://iam.googleapis.com/projects/-/serviceAccounts/{email}"
     return f"principal://goog/subject/{email}"
+
+
+# ---------------------------------------------------------------------------
+# BigQuery REST v2 helpers (pure stdlib)
+# ---------------------------------------------------------------------------
+
+
+def _bq_ensure_dataset(
+    project_id: str, dataset_id: str, location: str, labels: Dict[str, str]
+) -> None:
+    resp = _gcp_rest(
+        "POST",
+        f"{BQ_V2}/projects/{urllib.parse.quote(project_id, safe='')}/datasets",
+        {
+            "datasetReference": {"projectId": project_id, "datasetId": dataset_id},
+            "location": location,
+            "labels": labels,
+        },
+        allow_conflict=True,
+    )
+    status = "created" if resp is not None else "reusing"
+    print(f"  [{status}] {project_id}.{dataset_id} (location={location})")
+
+
+def _bq_query(
+    project_id: str, sql: str, labels: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    proj_q = urllib.parse.quote(project_id, safe="")
+    resp = _gcp_rest(
+        "POST",
+        f"{BQ_V2}/projects/{proj_q}/queries",
+        {
+            "query": sql,
+            "useLegacySql": False,
+            "useQueryCache": False,
+            "timeoutMs": 60000,
+            "labels": labels,
+        },
+    ) or {}
+
+    job_ref = resp.get("jobReference") or {}
+    job_id = job_ref.get("jobId", "")
+    job_loc = job_ref.get("location", "")
+
+    while not resp.get("jobComplete", False):
+        time.sleep(1.0)
+        loc_qs = f"?location={urllib.parse.quote(job_loc)}" if job_loc else ""
+        resp = _gcp_rest("GET", f"{BQ_V2}/projects/{proj_q}/queries/{job_id}{loc_qs}") or {}
+
+    fields = [f["name"] for f in (resp.get("schema") or {}).get("fields", [])]
+    rows: List[Dict[str, Any]] = []
+
+    def _collect(page: Dict[str, Any]) -> None:
+        for row in page.get("rows", []):
+            vals = [cell.get("v") for cell in row.get("f", [])]
+            rows.append(dict(zip(fields, vals)))
+
+    _collect(resp)
+    page_token = resp.get("pageToken") or ""
+    while page_token and job_id:
+        params = {"pageToken": page_token}
+        if job_loc:
+            params["location"] = job_loc
+        qs = urllib.parse.urlencode(params)
+        page = _gcp_rest("GET", f"{BQ_V2}/projects/{proj_q}/queries/{job_id}?{qs}") or {}
+        _collect(page)
+        page_token = page.get("pageToken") or ""
+
+    return rows
+
+
+def _bq_list_tables(project_id: str, dataset_id: str) -> List[Dict[str, Any]]:
+    proj_q = urllib.parse.quote(project_id, safe="")
+    ds_q = urllib.parse.quote(dataset_id, safe="")
+    tables: List[Dict[str, Any]] = []
+    page_token = ""
+    while True:
+        qs = f"maxResults=1000{f'&pageToken={urllib.parse.quote(page_token)}' if page_token else ''}"
+        resp = _gcp_rest(
+            "GET",
+            f"{BQ_V2}/projects/{proj_q}/datasets/{ds_q}/tables?{qs}",
+            allow_not_found=True,
+        )
+        if resp is None:
+            return []
+        tables.extend(resp.get("tables", []))
+        page_token = resp.get("nextPageToken") or ""
+        if not page_token:
+            break
+    return tables
+
+
+def _bq_get_table(project_id: str, dataset_id: str, table_id: str) -> Dict[str, Any]:
+    proj_q = urllib.parse.quote(project_id, safe="")
+    ds_q = urllib.parse.quote(dataset_id, safe="")
+    tbl_q = urllib.parse.quote(table_id, safe="")
+    return _gcp_rest("GET", f"{BQ_V2}/projects/{proj_q}/datasets/{ds_q}/tables/{tbl_q}") or {}
+
+
+def _bq_patch_table_schema(
+    project_id: str, dataset_id: str, table_id: str, fields: List[Dict[str, Any]]
+) -> None:
+    proj_q = urllib.parse.quote(project_id, safe="")
+    ds_q = urllib.parse.quote(dataset_id, safe="")
+    tbl_q = urllib.parse.quote(table_id, safe="")
+    _gcp_rest(
+        "PATCH",
+        f"{BQ_V2}/projects/{proj_q}/datasets/{ds_q}/tables/{tbl_q}",
+        {"schema": {"fields": fields}},
+    )
+
+
+def _bq_delete_dataset(project_id: str, dataset_id: str) -> None:
+    proj_q = urllib.parse.quote(project_id, safe="")
+    ds_q = urllib.parse.quote(dataset_id, safe="")
+    _gcp_rest(
+        "DELETE",
+        f"{BQ_V2}/projects/{proj_q}/datasets/{ds_q}?deleteContents=true",
+        allow_not_found=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Resource Manager Tags & BigQuery Data Policy v2 helpers
+# ---------------------------------------------------------------------------
 
 
 def _ensure_dg_tag_key(project_number: str, short_name: str, description: str) -> str:
@@ -269,7 +445,6 @@ def _list_v2_policies_for_key(
 def _expected_tags(mode: str, class_key: str, domain_key: str) -> Dict[str, str]:
     """Return expected INFORMATION_SCHEMA tag assertions for `core` or `fusion`."""
     expected: Dict[str, str] = {
-        # Shared seeds & marts (from common local dbt package `dbt_dgt_common`)
         "raw_customers.email": f"{class_key}=email",
         "raw_customers.work_email": f"{class_key}=email",
         "raw_customers.ssn": f"{class_key}=ssn",
@@ -313,6 +488,11 @@ def _expected_tags(mode: str, class_key: str, domain_key: str) -> Dict[str, str]
     return expected
 
 
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     project_id = _validate_project(args.project)
     dataset_id = _validate("dataset", args.dataset, _DATASET_RE)
@@ -344,12 +524,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     _ensure_dg_tag_value(domain_key_res, "finance", "Finance domain leaf value")
 
     print(f"\nEnsuring BigQuery dataset: {project_id}.{dataset_id} (location={location})")
-    bq_client = bigquery.Client(project=project_id)
-    ds = bigquery.Dataset(f"{project_id}.{dataset_id}")
-    ds.location = location
-    ds.labels = labels
-    bq_client.create_dataset(ds, exists_ok=True)
-    print(f"  [ready] {project_id}.{dataset_id}")
+    _bq_ensure_dataset(project_id, dataset_id, location, labels)
 
     class_key_fqn = f"{tag_project}/{class_key_short}"
     created_policies = False
@@ -446,7 +621,6 @@ def cmd_verify(args: argparse.Namespace) -> int:
     domain_key = f"{tag_parent}/{_validate('domain tag key', args.domain_key_name, _TAG_SHORT_RE)}"
     labels = _labels_for_mode(args.mode)
 
-    bq_client = bigquery.Client(project=project_id)
     sql = f"""
     SELECT
       table_name,
@@ -463,8 +637,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     FROM `{project_id}`.`{dataset_id}`.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS
     ORDER BY table_name, field_path
     """
-    cfg = bigquery.QueryJobConfig(use_query_cache=False, labels=labels)
-    rows = list(bq_client.query(sql, job_config=cfg).result())
+    rows = _bq_query(project_id, sql, labels)
 
     if not rows:
         print(f"No columns found in {project_id}.{dataset_id}. Run dbt seed/run/snapshot first.")
@@ -476,10 +649,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
     print("-" * 108)
     for r in rows:
         fq_col = f"{r['table_name']}.{r['field_path']}"
-        tags = r["data_governance_tags"] or ""
+        tags = r.get("data_governance_tags") or ""
+        dtype = r.get("data_type") or ""
         observed[fq_col] = tags
         if tags or args.all_columns:
-            print(f"{fq_col:<48} {r['data_type'][:11]:<12} {tags or '-'}")
+            print(f"{fq_col:<48} {dtype[:11]:<12} {tags or '-'}")
 
     expected = _expected_tags(args.mode, class_key, domain_key)
     mismatches = [
@@ -530,28 +704,20 @@ def cmd_teardown(args: argparse.Namespace) -> int:
     dataset_id = _validate("dataset", args.dataset, _DATASET_RE)
     location = _validate("location", args.location, _LOCATION_RE)
     policy_prefix = _validate("policy prefix", args.policy_prefix, _POLICY_PREFIX_RE)
-
-    bq_client = bigquery.Client(project=project_id)
     dataset_fqn = f"{project_id}.{dataset_id}"
 
-    try:
-        tables = list(bq_client.list_tables(dataset_fqn))
-    except Exception:
-        tables = []
-
-    for tbl_item in tables:
-        if tbl_item.table_type == "TABLE":
-            full_tbl = bq_client.get_table(tbl_item.reference)
-            raw_fields = copy.deepcopy(full_tbl.to_api_repr()["schema"]["fields"])
+    for tbl_item in _bq_list_tables(project_id, dataset_id):
+        if tbl_item.get("type") == "TABLE":
+            table_id = (tbl_item.get("tableReference") or {}).get("tableId")
+            if not table_id:
+                continue
+            full_tbl = _bq_get_table(project_id, dataset_id, table_id)
+            raw_fields = copy.deepcopy((full_tbl.get("schema") or {}).get("fields", []))
             if _clear_field_tags_recursive(raw_fields):
-                patched = bigquery.Table(
-                    full_tbl.reference,
-                    schema=[bigquery.SchemaField.from_api_repr(f) for f in raw_fields],
-                )
-                bq_client.update_table(patched, ["schema"])
-                print(f"  [detached tags] {dataset_fqn}.{tbl_item.table_id}")
+                _bq_patch_table_schema(project_id, dataset_id, table_id, raw_fields)
+                print(f"  [detached tags] {dataset_fqn}.{table_id}")
 
-    bq_client.delete_dataset(dataset_fqn, delete_contents=True, not_found_ok=True)
+    _bq_delete_dataset(project_id, dataset_id)
     print(f"  [deleted dataset] {dataset_fqn}")
 
     loc_lower = location.lower()
@@ -568,7 +734,7 @@ def cmd_teardown(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Shared GCP setup/verify/teardown helper for dbt Core 1.x & dbt v2 / Fusion DGT examples."
+        description="Zero-dependency GCP setup/verify/teardown helper for dbt Core 1.x & dbt v2 / Fusion DGT examples."
     )
     parser.add_argument(
         "--mode",
