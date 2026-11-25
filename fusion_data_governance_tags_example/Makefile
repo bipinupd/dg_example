@@ -1,10 +1,16 @@
 # dbt v2 / Fusion batched `ALTER TABLE` Data Governance Tags example.
 # Shared targets & GCP helper live in ../common/make/common.mk.
 
-FUSION_REPO ?= ../../dbt
-CORE_DBT ?= ../../.venv/bin/dbt
+FUSION_REPO ?= $(firstword $(wildcard ../dbt) $(wildcard ../../dbt) $(wildcard ../../../dbt) ../../dbt)
+CORE_DBT ?= $(firstword \
+  $(if $(VIRTUAL_ENV),$(wildcard $(VIRTUAL_ENV)/bin/dbt)) \
+  $(wildcard .venv/bin/dbt) \
+  $(wildcard ../.venv/bin/dbt) \
+  $(wildcard ../../.venv/bin/dbt) \
+  $(wildcard ../../../.venv/bin/dbt) \
+  dbt)
 
-# Prefer the locally built Fusion binary from ../../dbt; fall back to `dbt` on PATH.
+# Prefer a locally built Fusion binary from FUSION_REPO; fall back to `dbt` on PATH.
 DBT_FUSION_BIN ?= $(firstword $(wildcard $(FUSION_REPO)/target/release/dbt) $(wildcard $(FUSION_REPO)/target/debug/dbt) dbt)
 DBT_BIN := $(DBT_FUSION_BIN)
 
@@ -56,15 +62,15 @@ test-fusion-rust:
 	cargo test --manifest-path "$(FUSION_REPO)/Cargo.toml" -p dbt-adapter --lib update_columns
 	cargo test --manifest-path "$(FUSION_REPO)/Cargo.toml" -p dbt-loader --test main data_governance_tags
 
-# Renders exact Fusion ALTER TABLE DDL directly from ../../dbt/.../adapters.sql
-# using target/manifest.json (uses Fusion binary if available, else local dbt-core).
+# Renders exact Fusion ALTER TABLE DDL directly from $(FUSION_REPO)/.../adapters.sql
+# using target/manifest.json (`dbt parse` is 100% offline and needs no GCP auth).
 preview-ddl:
 	@if [ -x "$(DBT_FUSION_BIN)" ] || command -v "$(DBT_FUSION_BIN)" >/dev/null 2>&1; then \
 		if [ ! -e "dbt_packages/dbt_dgt_common" ]; then $(DBT_ENV) $(DBT_FUSION_BIN) deps $(DBT_FLAGS); fi; \
-		$(DBT_ENV) $(DBT_FUSION_BIN) compile $(DBT_FLAGS); \
+		$(DBT_ENV) $(DBT_FUSION_BIN) parse $(DBT_FLAGS); \
 	else \
 		if [ ! -e "dbt_packages/dbt_dgt_common" ]; then $(DBT_ENV) $(CORE_DBT) deps $(DBT_FLAGS) --no-use-colors -q; fi; \
-		$(DBT_ENV) $(CORE_DBT) compile $(DBT_FLAGS) --no-use-colors -q; \
+		$(DBT_ENV) $(CORE_DBT) parse $(DBT_FLAGS) --no-use-colors -q; \
 	fi
 	$(PYTHON) scripts/preview_fusion_ddl.py \
 		--manifest target/manifest.json \

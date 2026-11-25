@@ -11,7 +11,13 @@
 #   POLICY_PREFIX       prefix for optional V2 Data Policy IDs
 
 COMMON_DIR ?= ../common
-PYTHON ?= ../../.venv/bin/python
+PYTHON ?= $(firstword \
+  $(if $(VIRTUAL_ENV),$(wildcard $(VIRTUAL_ENV)/bin/python)) \
+  $(wildcard .venv/bin/python) \
+  $(wildcard ../.venv/bin/python) \
+  $(wildcard ../../.venv/bin/python) \
+  $(wildcard ../../../.venv/bin/python) \
+  python3)
 
 PROJECT ?= $(GCP_PROJECT_ID)
 DATASET ?= $(or $(BQ_DATASET),$(DEFAULT_DATASET))

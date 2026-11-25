@@ -1,7 +1,13 @@
 # dbt Core 1.x (`dbt-bigquery` REST `tables.patch`) Data Governance Tags example.
 # Shared targets & GCP helper live in ../common/make/common.mk.
 
-DBT_BIN ?= ../../.venv/bin/dbt
+DBT_BIN ?= $(firstword \
+  $(if $(VIRTUAL_ENV),$(wildcard $(VIRTUAL_ENV)/bin/dbt)) \
+  $(wildcard .venv/bin/dbt) \
+  $(wildcard ../.venv/bin/dbt) \
+  $(wildcard ../../.venv/bin/dbt) \
+  $(wildcard ../../../.venv/bin/dbt) \
+  dbt)
 EXAMPLE_MODE := core
 DEFAULT_DATASET := dbt_dgt_example
 DEFAULT_CLASS_KEY := dbt_dgt_e2e_class

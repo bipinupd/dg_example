@@ -26,9 +26,16 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-import google.auth
-import google.auth.transport.requests
-from google.cloud import bigquery
+try:
+    import google.auth
+    import google.auth.transport.requests
+    from google.cloud import bigquery
+except ImportError as exc:
+    raise SystemExit(
+        f"Missing Python dependency ({exc}). Either install them in a virtualenv "
+        "(`pip install google-auth google-cloud-bigquery`) or pass "
+        "`PYTHON=/path/to/venv/bin/python`."
+    ) from exc
 
 CRM_V3 = "https://cloudresourcemanager.googleapis.com/v3"
 DP_V2 = "https://bigquerydatapolicy.googleapis.com/v2"
