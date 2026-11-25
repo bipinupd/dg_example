@@ -1,0 +1,52 @@
+version: 2
+
+unit_tests:
+  - name: test_fct_customer_profiles_full_refresh_builds_nested_structs
+    description: >-
+      Verify fct_customer_profiles builds nested STRUCT and ARRAY<STRUCT>
+      columns cleanly on a full refresh run.
+    model: fct_customer_profiles
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_customers')
+        rows:
+          - customer_id: 1
+            full_name: "Alice Mercer"
+            email: "alice@example.com"
+            work_email: "alice.w@corp.example.com"
+            ssn: "000-00-0001"
+            country_code: "US"
+            loyalty_tier: "Gold"
+            annual_income_usd: 145000
+            updated_at: "2026-01-10 09:15:00+00:00"
+      - input: ref('stg_orders')
+        rows:
+          - order_id: 1001
+            customer_id: 1
+            order_date: "2026-01-11"
+            amount_usd: 250
+            status: "completed"
+            actor_email: "actor.a@example.com"
+            event_type: "checkout"
+    expect:
+      format: sql
+      rows: |
+        SELECT
+          1 AS customer_id,
+          'alice@example.com' AS primary_email,
+          'Tier: Gold' AS public_display_note,
+          STRUCT(
+            'alice.w@corp.example.com' AS work_email,
+            STRUCT('000-00-0001' AS ssn, 'US' AS country_code) AS identity
+          ) AS profile,
+          [
+            STRUCT(
+              1001 AS order_id,
+              DATE '2026-01-11' AS order_date,
+              'actor.a@example.com' AS actor_email,
+              'checkout' AS event_type
+            )
+          ] AS order_events,
+          TIMESTAMP '2026-01-10 09:15:00+00:00' AS updated_at

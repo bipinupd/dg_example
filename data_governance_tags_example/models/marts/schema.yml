@@ -1,0 +1,89 @@
+version: 2
+
+# ---------------------------------------------------------------------------
+# dbt Core 1.x (`dbt-bigquery` REST `tables.patch`) Engine-Specific Marts
+# ---------------------------------------------------------------------------
+# Shared models (`stg_customers`, `stg_orders`, `dim_customers`,
+# `v_customers_public`) live in `../common` (`dbt_dgt_common`).
+#
+# This file contains ONLY models exercising dbt-bigquery 1.x REST `tables.patch`
+# capabilities: 1-level & 2-level nested STRUCT leaf tags and repeated
+# ARRAY<STRUCT> leaf tags (including inside contract-enforced models).
+# ---------------------------------------------------------------------------
+
+models:
+  - name: fct_customer_profiles
+    description: >-
+      Incremental customer profile table demonstrating dbt-bigquery 1.x REST
+      `tables.patch` capabilities: in-place incremental merges, 1-level &
+      2-level nested STRUCT leaf tags, repeated ARRAY<STRUCT> leaf tags, and
+      explicit tag clearing (`{}`).
+    columns:
+      - name: customer_id
+        description: "Primary customer identifier (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: primary_email
+        description: "Top-level customer email column with PII governance tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+        data_tests:
+          - not_null
+      - name: public_display_note
+        description: >-
+          Non-sensitive display label demonstrating explicit tag clearing with
+          an empty mapping (`{}`).
+        data_governance_tags: {}
+      - name: profile
+        description: >-
+          Parent STRUCT column. BigQuery forbids attaching `data_governance_tags`
+          to RECORD/STRUCT parents; descriptions are supported here while tags
+          go on leaf subfields below.
+      - name: profile.work_email
+        description: "1-level nested STRUCT leaf tagged as PII email."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: profile.identity.ssn
+        description: "2-level nested STRUCT leaf tagged as PII SSN."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_ssn_tag_value') } }}"
+      - name: profile.identity.country_code
+        description: "2-level nested STRUCT leaf left intentionally untagged."
+      - name: order_events.actor_email
+        description: >-
+          Repeated ARRAY<STRUCT> leaf column tagged as PII email (supported via
+          dbt-bigquery 1.x REST `tables.patch`).
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: updated_at
+        description: "High-watermark UTC timestamp used for incremental merges."
+        data_tests:
+          - not_null
+
+  - name: dim_customers_contracted
+    description: >-
+      Contract-enforced customer table combining `contract: {enforced: true}`
+      type guarantees with top-level and nested STRUCT leaf Data Governance Tags
+      (dbt-bigquery 1.x REST `tables.patch`).
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: customer_id
+        data_type: int64
+        description: "Contracted INT64 primary key (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: email
+        data_type: string
+        description: "Contracted STRING email column protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: loyalty_tier
+        data_type: string
+        description: "Contracted STRING loyalty tier tagged as `public`."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_public_tag_value') } }}"
+      - name: identity.ssn
+        data_type: string
+        description: "Contracted nested STRUCT leaf SSN protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_ssn_tag_value') } }}"
+      - name: identity.country_code
+        data_type: string
+        description: "Contracted nested STRUCT leaf ISO-2 country code (untagged)."

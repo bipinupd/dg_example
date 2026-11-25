@@ -1,0 +1,61 @@
+name: 'dbt_data_governance_tags_example'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dbt_data_governance_tags_example'
+
+model-paths: ['models']
+snapshot-paths: ['snapshots']
+
+clean-targets:
+  - 'target'
+  - 'dbt_packages'
+
+# ---------------------------------------------------------------------------
+# Configurable Data Governance Tag variables
+# ---------------------------------------------------------------------------
+# Shared seeds, staging models, dim_customers, v_customers_public, tests, and
+# audit macro are imported from the local package `../common` (`dbt_dgt_common`).
+#
+# Leave `dgt_parent_id`, `dgt_class_key_name`, and `dgt_domain_key_name` empty
+# to auto-resolve at schema parse time via:
+#   --vars override -> env_var(...) -> target.database / default short name.
+vars:
+  dgt_parent_id: ''
+  dgt_class_key_name: ''
+  dgt_domain_key_name: ''
+  dgt_class_key_default: 'dbt_dgt_e2e_class'
+  dgt_domain_key_default: 'dbt_dgt_e2e_domain'
+  dgt_email_tag_value: 'email'
+  dgt_ssn_tag_value: 'ssn'
+  dgt_public_tag_value: 'public'
+  dgt_finance_tag_value: 'finance'
+
+# ---------------------------------------------------------------------------
+# Resource configurations (root project + shared `dbt_dgt_common` package)
+# ---------------------------------------------------------------------------
+# `persist_docs.columns: true` is REQUIRED for dbt-bigquery to patch BigQuery
+# column descriptions and `data_governance_tags` via REST `tables.patch`.
+models:
+  dbt_dgt_common:
+    +persist_docs:
+      relation: true
+      columns: true
+  dbt_data_governance_tags_example:
+    +persist_docs:
+      relation: true
+      columns: true
+    marts:
+      +materialized: table
+
+seeds:
+  dbt_dgt_common:
+    +persist_docs:
+      relation: true
+      columns: true
+
+snapshots:
+  dbt_data_governance_tags_example:
+    +persist_docs:
+      relation: true
+      columns: true
