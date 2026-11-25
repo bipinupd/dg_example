@@ -1,3 +1,0 @@
-
--- Fixture for stg_customers
-select safe_cast(1 as INT64) as `customer_id`, safe_cast('''Alice Mercer''' as STRING) as `full_name`, safe_cast('''alice@example.com''' as STRING) as `email`, safe_cast('''alice.w@corp.example.com''' as STRING) as `work_email`, safe_cast('''000-00-0001''' as STRING) as `ssn`, safe_cast('''US''' as STRING) as `country_code`, safe_cast('''Gold''' as STRING) as `loyalty_tier`, safe_cast(145000 as NUMERIC) as `annual_income_usd`, safe_cast('''2026-01-10 09:15:00+00:00''' as TIMESTAMP) as `updated_at`

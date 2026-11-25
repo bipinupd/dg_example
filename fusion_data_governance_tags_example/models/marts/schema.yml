@@ -1,0 +1,88 @@
+version: 2
+
+# ---------------------------------------------------------------------------
+# dbt v2 / Fusion Batched `ALTER TABLE ... ALTER COLUMN` Engine-Specific Marts
+# ---------------------------------------------------------------------------
+# Shared models (`stg_customers`, `stg_orders`, `dim_customers`,
+# `v_customers_public`) live in `../common` (`dbt_dgt_common`).
+#
+# This file contains ONLY models tailored for dbt v2 / Fusion DDL semantics:
+#   - Top-level PII columns (BigQuery ALTER COLUMN DDL rejects dotted STRUCT paths)
+#   - Described-only parent STRUCT (`profile_metadata`)
+#   - Explicit tag clearing (`data_governance_tags: {}` -> `data_governance_tags=[]`)
+#   - Top-level contract-enforced table (`contract: {enforced: true}`)
+# ---------------------------------------------------------------------------
+
+models:
+  - name: fct_customer_profiles
+    description: >-
+      Incremental customer profile table structured for dbt v2 / Fusion:
+      sensitive PII stays in top-level columns (tagged via batched
+      `ALTER TABLE ... ALTER COLUMN` DDL), non-PII structured attributes live in
+      a described-only STRUCT column (`profile_metadata`), and
+      `public_display_note` demonstrates explicit tag clearing (`{}` ->
+      `data_governance_tags=[]`).
+    columns:
+      - name: customer_id
+        description: "Primary customer identifier (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: primary_email
+        description: "Top-level customer primary email tagged as PII email."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+        data_tests:
+          - not_null
+      - name: work_email
+        description: "Top-level customer work email tagged as PII email."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: ssn
+        description: "Top-level synthetic SSN tagged as PII SSN."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_ssn_tag_value') } }}"
+      - name: latest_actor_email
+        description: "Top-level email of the most recent order actor tagged as PII email."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: public_display_note
+        description: >-
+          Non-sensitive display label demonstrating Fusion's explicit tag clear
+          (`data_governance_tags: {}` -> `set options (data_governance_tags=[])`).
+        data_governance_tags: {}
+      - name: profile_metadata
+        description: >-
+          Non-PII parent STRUCT column (descriptions are supported on STRUCT
+          parents; never attach `data_governance_tags` to a STRUCT parent or
+          dotted nested path in Fusion).
+      - name: updated_at
+        description: "High-watermark UTC timestamp used for incremental merges."
+        data_tests:
+          - not_null
+
+  - name: dim_customers_contracted
+    description: >-
+      Contract-enforced customer table combining `contract: {enforced: true}`
+      type guarantees with top-level Data Governance Tags on dbt v2 / Fusion.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: customer_id
+        data_type: int64
+        description: "Contracted INT64 primary key (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: email
+        data_type: string
+        description: "Contracted STRING email column protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: ssn
+        data_type: string
+        description: "Contracted STRING SSN column protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_ssn_tag_value') } }}"
+      - name: loyalty_tier
+        data_type: string
+        description: "Contracted STRING loyalty tier tagged as `public`."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_public_tag_value') } }}"
+      - name: country_code
+        data_type: string
+        description: "Contracted STRING ISO-2 country code (untagged)."

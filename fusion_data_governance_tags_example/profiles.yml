@@ -1,0 +1,26 @@
+# dbt v2 / Fusion BigQuery profile (matches `BigqueryDbConfig` in dbt-schemas).
+# Note: Unlike dbt Core 1.x, Fusion configures BigQuery job/table `labels` in
+# `dbt_project.yml` (`+labels:`), NOT inside `profiles.yml`.
+
+dbt_fusion_dgt_example:
+  target: "{{ env_var('DBT_TARGET', '') or 'dev' }}"
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT_ID', '') or 'your-gcp-project-id' }}"
+      dataset: "{{ env_var('BQ_DATASET', '') or 'dbt_fusion_dgt_example' }}"
+      location: "{{ env_var('BQ_LOCATION', '') or 'US' }}"
+      threads: 4
+      job_execution_timeout_seconds: 300
+      priority: interactive
+
+    prod:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT_ID', '') or 'your-gcp-project-id' }}"
+      dataset: "{{ env_var('BQ_DATASET', '') or 'dbt_fusion_dgt_example_prod' }}"
+      location: "{{ env_var('BQ_LOCATION', '') or 'US' }}"
+      threads: 8
+      job_execution_timeout_seconds: 600
+      priority: interactive

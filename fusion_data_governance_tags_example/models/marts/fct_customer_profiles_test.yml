@@ -1,0 +1,55 @@
+version: 2
+
+unit_tests:
+  - name: test_fct_customer_profiles_full_refresh_top_level_pii_and_metadata_struct
+    description: >-
+      Verify fct_customer_profiles exposes top-level PII columns alongside the
+      non-PII profile_metadata STRUCT on a full refresh run.
+    model: fct_customer_profiles
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_customers')
+        rows:
+          - customer_id: 1
+            full_name: "Alice Mercer"
+            email: "alice@example.com"
+            work_email: "alice.w@corp.example.com"
+            ssn: "000-00-0001"
+            country_code: "US"
+            loyalty_tier: "Gold"
+            annual_income_usd: 145000
+            updated_at: "2026-01-10 09:15:00+00:00"
+      - input: ref('stg_orders')
+        rows:
+          - order_id: 1001
+            customer_id: 1
+            order_date: "2026-01-11"
+            amount_usd: 250
+            status: "completed"
+            actor_email: "actor.first@example.com"
+            event_type: "checkout"
+          - order_id: 1002
+            customer_id: 1
+            order_date: "2026-01-14"
+            amount_usd: 125.5
+            status: "completed"
+            actor_email: "actor.latest@example.com"
+            event_type: "renewal"
+    expect:
+      format: sql
+      rows: |
+        SELECT
+          1 AS customer_id,
+          'alice@example.com' AS primary_email,
+          'alice.w@corp.example.com' AS work_email,
+          '000-00-0001' AS ssn,
+          'actor.latest@example.com' AS latest_actor_email,
+          'Tier: Gold' AS public_display_note,
+          STRUCT(
+            'US' AS country_code,
+            'Gold' AS loyalty_tier,
+            2 AS total_event_count
+          ) AS profile_metadata,
+          TIMESTAMP '2026-01-10 09:15:00+00:00' AS updated_at

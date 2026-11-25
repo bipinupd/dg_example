@@ -1,0 +1,74 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: >-
+      Shared core customer dimension table demonstrating top-level scalar column
+      `data_governance_tags` across both classification and domain Tag Keys.
+    columns:
+      - name: customer_id
+        description: "Primary customer identifier (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: full_name
+        description: "Cleaned customer full name."
+      - name: email
+        description: >-
+          Customer primary email tagged with leaf value `email` (child under
+          `pii`). Triggers `EMAIL_MASK` when bound to a Data Policy v2 rule.
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+        data_tests:
+          - not_null
+      - name: ssn
+        description: >-
+          Synthetic US SSN tagged with leaf value `ssn` (child under `pii`).
+          Triggers `SHA256` masking when bound to a Data Policy v2 rule.
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_ssn_tag_value') } }}"
+      - name: country_code
+        description: "ISO-2 country code (untagged)."
+      - name: loyalty_tier
+        description: "Customer loyalty tier tagged with root classification `public`."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_public_tag_value') } }}"
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Bronze', 'Silver', 'Gold', 'Platinum']
+      - name: annual_income_usd
+        description: >-
+          Customer annual income in USD tagged under a second Tag Key (domain:
+          `finance`) on a sibling column in the same table.
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_domain_key_name') or env_var('DGT_DOMAIN_KEY_NAME', '') or var('dgt_domain_key_default'))): var('dgt_finance_tag_value') } }}"
+      - name: completed_order_count
+        description: "Total count of completed orders for this customer."
+        data_tests:
+          - not_null
+      - name: lifetime_spend_usd
+        description: "Total USD spend across completed orders."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_domain_key_name') or env_var('DGT_DOMAIN_KEY_NAME', '') or var('dgt_domain_key_default'))): var('dgt_finance_tag_value') } }}"
+        data_tests:
+          - not_null
+      - name: updated_at
+        description: "UTC timestamp of the latest customer record update."
+        data_tests:
+          - not_null
+
+  - name: v_customers_public
+    description: >-
+      Shared public non-PII analytics view over `dim_customers`. Carries column
+      descriptions only (no `data_governance_tags`, since BigQuery only allows
+      governance tags on tables).
+    columns:
+      - name: customer_id
+        description: "Customer identifier."
+        data_tests:
+          - unique
+          - not_null
+      - name: country_code
+        description: "ISO-2 country code."
+      - name: loyalty_tier
+        description: "Customer loyalty tier (inherits tag/policy from dim_customers)."
+      - name: completed_order_count
+        description: "Completed order count."
+      - name: updated_at
+        description: "Last update UTC timestamp."

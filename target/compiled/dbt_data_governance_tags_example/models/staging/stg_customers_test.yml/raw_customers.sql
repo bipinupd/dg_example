@@ -1,5 +1,0 @@
-
--- Fixture for raw_customers
-select safe_cast(1 as INT64) as `customer_id`, safe_cast('''  Alice Mercer  ''' as STRING) as `full_name`, safe_cast('''  alice@example.com ''' as STRING) as `email`, safe_cast('''alice.w@corp.example.com''' as STRING) as `work_email`, safe_cast('''000-00-0001''' as STRING) as `ssn`, safe_cast(''' US ''' as STRING) as `country_code`, safe_cast(''' Gold ''' as STRING) as `loyalty_tier`, safe_cast('''145000.00''' as STRING) as `annual_income_usd`, safe_cast('''2026-01-10T09:15:00Z''' as STRING) as `updated_at`
-union all
-select safe_cast(null as INT64) as `customer_id`, safe_cast('''Invalid Row''' as STRING) as `full_name`, safe_cast('''invalid@example.com''' as STRING) as `email`, safe_cast('''invalid@example.com''' as STRING) as `work_email`, safe_cast('''000-00-0000''' as STRING) as `ssn`, safe_cast('''US''' as STRING) as `country_code`, safe_cast('''Bronze''' as STRING) as `loyalty_tier`, safe_cast('''0''' as STRING) as `annual_income_usd`, safe_cast('''2026-01-10T09:15:00Z''' as STRING) as `updated_at`

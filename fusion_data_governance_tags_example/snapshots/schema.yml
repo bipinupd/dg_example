@@ -1,0 +1,34 @@
+version: 2
+
+# Idiomatic dbt v2 / Fusion YAML-defined SCD Type 2 snapshot (no SQL
+# `{% snapshot %}` block needed). References `dim_customers` from `../common`.
+snapshots:
+  - name: customers_snapshot
+    relation: ref('dim_customers')
+    description: >-
+      YAML-defined SCD Type 2 history table over `dim_customers` demonstrating
+      top-level `data_governance_tags` persisted via `dbt snapshot` on dbt v2 / Fusion.
+    config:
+      strategy: timestamp
+      unique_key: customer_id
+      updated_at: updated_at
+      persist_docs:
+        relation: true
+        columns: true
+    columns:
+      - name: customer_id
+        description: "Primary customer identifier (untagged)."
+      - name: email
+        description: "Snapshotted customer email protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: ssn
+        description: "Snapshotted synthetic SSN protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_ssn_tag_value') } }}"
+      - name: loyalty_tier
+        description: "Snapshotted loyalty tier tagged as `public`."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_public_tag_value') } }}"
+      - name: annual_income_usd
+        description: "Snapshotted annual income classified under the finance domain Tag Key."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_domain_key_name') or env_var('DGT_DOMAIN_KEY_NAME', '') or var('dgt_domain_key_default'))): var('dgt_finance_tag_value') } }}"
+      - name: updated_at
+        description: "Source update UTC timestamp used for SCD-2 change detection."

@@ -1,0 +1,39 @@
+name: 'dbt_dgt_common'
+version: '1.0.0'
+config-version: 2
+
+model-paths: ['models']
+seed-paths: ['seeds']
+macro-paths: ['macros']
+test-paths: ['tests']
+
+# Default fallback vars for the shared local package.
+# Root projects (`data_governance_tags_example` and
+# `fusion_data_governance_tags_example`) override `dgt_class_key_default` and
+# `dgt_domain_key_default` in their own `dbt_project.yml` (or via env/CLI vars).
+vars:
+  dgt_parent_id: ''
+  dgt_class_key_name: ''
+  dgt_domain_key_name: ''
+  dgt_class_key_default: 'dbt_dgt_e2e_class'
+  dgt_domain_key_default: 'dbt_dgt_e2e_domain'
+  dgt_email_tag_value: 'email'
+  dgt_ssn_tag_value: 'ssn'
+  dgt_public_tag_value: 'public'
+  dgt_finance_tag_value: 'finance'
+
+models:
+  dbt_dgt_common:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
+
+seeds:
+  dbt_dgt_common:
+    +persist_docs:
+      relation: true
+      columns: true

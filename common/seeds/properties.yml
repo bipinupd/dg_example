@@ -1,0 +1,83 @@
+version: 2
+
+seeds:
+  - name: raw_customers
+    description: >-
+      Shared synthetic raw customer seed loaded via `dbt seed`. Demonstrates
+      attaching BigQuery Data Governance Tags directly on seed tables when
+      `persist_docs.columns: true` is enabled (works on both dbt Core 1.x REST
+      tables.patch and dbt v2 / Fusion batched ALTER TABLE DDL).
+    config:
+      column_types:
+        customer_id: int64
+        full_name: string
+        email: string
+        work_email: string
+        ssn: string
+        country_code: string
+        loyalty_tier: string
+        annual_income_usd: string
+        updated_at: string
+    columns:
+      - name: customer_id
+        description: "Primary customer identifier (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: full_name
+        description: "Raw customer full name (may contain leading/trailing whitespace)."
+      - name: email
+        description: "Raw customer personal email protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: work_email
+        description: "Raw customer work email protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: ssn
+        description: "Raw synthetic SSN protected by a Data Governance Tag."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_ssn_tag_value') } }}"
+      - name: country_code
+        description: "ISO-2 country code."
+      - name: loyalty_tier
+        description: "Customer loyalty tier tagged with root value `public`."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_public_tag_value') } }}"
+      - name: annual_income_usd
+        description: "Raw annual income string classified under the finance domain Tag Key."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_domain_key_name') or env_var('DGT_DOMAIN_KEY_NAME', '') or var('dgt_domain_key_default'))): var('dgt_finance_tag_value') } }}"
+      - name: updated_at
+        description: "Raw ISO-8601 UTC update timestamp string."
+
+  - name: raw_orders
+    description: >-
+      Shared synthetic raw order & actor event seed loaded via `dbt seed` with
+      top-level `data_governance_tags`.
+    config:
+      column_types:
+        order_id: int64
+        customer_id: int64
+        order_date: string
+        amount_usd: string
+        status: string
+        actor_email: string
+        event_type: string
+    columns:
+      - name: order_id
+        description: "Primary order identifier (untagged)."
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key referencing raw_customers.customer_id."
+        data_tests:
+          - not_null
+      - name: order_date
+        description: "Raw order date string with mixed YYYY-MM-DD and MM/DD/YYYY formats."
+      - name: amount_usd
+        description: "Raw order amount string classified under the finance domain Tag Key."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_domain_key_name') or env_var('DGT_DOMAIN_KEY_NAME', '') or var('dgt_domain_key_default'))): var('dgt_finance_tag_value') } }}"
+      - name: status
+        description: "Raw order lifecycle status (completed, cancelled)."
+      - name: actor_email
+        description: "Email address of the actor who initiated the order event."
+        data_governance_tags: "{{ { ((var('dgt_parent_id') or env_var('DGT_PARENT_ID', '') or target.database) ~ '/' ~ (var('dgt_class_key_name') or env_var('DGT_CLASS_KEY_NAME', '') or var('dgt_class_key_default'))): var('dgt_email_tag_value') } }}"
+      - name: event_type
+        description: "Order event category (checkout, renewal, upgrade, refund)."
